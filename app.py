@@ -1,18 +1,19 @@
-# app.py - Production-Level Restaurant Reservation System
+# app.py - Startup-Ready SaaS Restaurant Platform
 # Restaurant: Matt Tasty Treats 🍽️
+# Fully branded, UI-enhanced, multi-role SaaS system
 
 import streamlit as st
 import sqlite3
 import pandas as pd
-from datetime import datetime, date, time
+from datetime import datetime
 import hashlib
 
 # -------------------------------
-# CONFIG
+# CONFIG + BRANDING
 # -------------------------------
 
 st.set_page_config(
-    page_title="Matt Tasty Treats - Reservations",
+    page_title="Matt Tasty Treats - Smart Dining SaaS",
     layout="wide",
     page_icon="🍽️"
 )
@@ -20,59 +21,102 @@ st.set_page_config(
 RESTAURANT_NAME = "Matt Tasty Treats"
 
 # -------------------------------
+# BEAUTIFUL UI (STARTUP LEVEL STYLING)
+# -------------------------------
+
+def load_ui():
+    st.markdown("""
+    <style>
+    .stApp {
+        background: linear-gradient(rgba(0,0,0,0.75), rgba(0,0,0,0.75)),
+        url('https://images.unsplash.com/photo-1529692236671-f1f6cf9683ba');
+        background-size: cover;
+        background-attachment: fixed;
+        color: white;
+    }
+
+    .hero {
+        text-align: center;
+        padding: 40px;
+        border-radius: 20px;
+        background: rgba(0,0,0,0.5);
+        margin-bottom: 20px;
+    }
+
+    .title {
+        font-size: 48px;
+        font-weight: bold;
+        color: #f5c542;
+    }
+
+    .subtitle {
+        font-size: 18px;
+        opacity: 0.9;
+    }
+
+    .card {
+        background: rgba(255,255,255,0.08);
+        padding: 20px;
+        border-radius: 15px;
+        margin-bottom: 15px;
+        backdrop-filter: blur(10px);
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def logo():
+    st.markdown("""
+    <div style='text-align:center;'>
+        <svg width='120' height='120'>
+            <circle cx='60' cy='60' r='55' stroke='#f5c542' stroke-width='4' fill='black' />
+            <text x='50%' y='55%' text-anchor='middle' fill='#f5c542' font-size='20' font-family='Arial'>MTT</text>
+        </svg>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# -------------------------------
 # DATABASE
 # -------------------------------
 
 def get_db():
-    return sqlite3.connect("restaurant.db", check_same_thread=False)
+    return sqlite3.connect("matt_tasty_treats.db", check_same_thread=False)
 
 
 def init_db():
     conn = get_db()
     c = conn.cursor()
 
-    c.execute("""CREATE TABLE IF NOT EXISTS reservations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        customer_name TEXT,
-        phone TEXT,
-        email TEXT,
-        reservation_date TEXT,
-        reservation_time TEXT,
-        guest_count INTEGER,
-        table_number INTEGER,
-        status TEXT DEFAULT 'pending',
-        special_requests TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS tables (
-        table_id INTEGER PRIMARY KEY,
-        capacity INTEGER,
-        is_active INTEGER DEFAULT 1
-    )""")
-
-    c.execute("""CREATE TABLE IF NOT EXISTS admin_users (
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE,
-        password_hash TEXT
+        password_hash TEXT,
+        role TEXT
     )""")
 
-    # seed tables
-    c.execute("SELECT COUNT(*) FROM tables")
-    if c.fetchone()[0] == 0:
-        c.executemany(
-            "INSERT INTO tables VALUES (?, ?, 1)",
-            [(1,2),(2,2),(3,4),(4,4),(5,6),(6,8)]
-        )
+    c.execute("""CREATE TABLE IF NOT EXISTS reservations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        name TEXT,
+        phone TEXT,
+        email TEXT,
+        date TEXT,
+        time TEXT,
+        guests INTEGER,
+        table_no INTEGER,
+        status TEXT DEFAULT 'pending'
+    )""")
+
+    conn.commit()
 
     # seed admin
-    c.execute("SELECT COUNT(*) FROM admin_users")
+    c.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
     if c.fetchone()[0] == 0:
         pw = hashlib.sha256("admin123".encode()).hexdigest()
-        c.execute(
-            "INSERT INTO admin_users (username, password_hash) VALUES (?,?)",
-            ("admin", pw)
-        )
+        c.execute("INSERT INTO users (username, password_hash, role) VALUES (?,?,?)",
+                  ("admin", pw, "admin"))
 
     conn.commit()
     conn.close()
@@ -89,188 +133,129 @@ def hash_pw(pw):
 def login(username, password):
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT password_hash FROM admin_users WHERE username=?", (username,))
-    row = c.fetchone()
+    c.execute("SELECT id, password_hash, role FROM users WHERE username=?", (username,))
+    user = c.fetchone()
     conn.close()
 
-    if row and row[0] == hash_pw(password):
-        return True
-    return False
+    if user and user[1] == hash_pw(password):
+        return {"id": user[0], "role": user[2], "username": username}
+    return None
 
 
 # -------------------------------
-# HELPERS
+# RESERVATION ENGINE
 # -------------------------------
 
-def fetch_reservations():
+def create_reservation(user_id, name, phone, email, date, time, guests):
     conn = get_db()
-    df = pd.read_sql("SELECT * FROM reservations ORDER BY reservation_date DESC", conn)
+    c = conn.cursor()
+
+    table_no = (guests % 5) + 1
+
+    c.execute("""
+        INSERT INTO reservations (user_id, name, phone, email, date, time, guests, table_no)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (user_id, name, phone, email, str(date), str(time), guests, table_no))
+
+    conn.commit()
+    conn.close()
+
+    return table_no
+
+
+def fetch_reservations(role, user_id):
+    conn = get_db()
+
+    if role == "admin":
+        df = pd.read_sql("SELECT * FROM reservations", conn)
+    else:
+        df = pd.read_sql("SELECT * FROM reservations WHERE user_id=?", conn, params=(user_id,))
+
     conn.close()
     return df
 
 
-def is_slot_taken(rdate, rtime, guests):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("""
-        SELECT * FROM reservations
-        WHERE reservation_date=? AND reservation_time=? AND status!='cancelled'
-    """, (str(rdate), str(rtime)))
-    result = c.fetchone()
-    conn.close()
-    return result is not None
-
-
-def insert_reservation(name, phone, email, rdate, rtime, guests, requests):
-    conn = get_db()
-    c = conn.cursor()
-
-    # simple table assignment
-    table_number = (guests % 6) + 1
-
-    c.execute("""
-        INSERT INTO reservations
-        (customer_name, phone, email, reservation_date, reservation_time, guest_count, table_number, special_requests)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (name, phone, email, str(rdate), str(rtime), guests, table_number, requests))
-
-    conn.commit()
-    conn.close()
-
-
-def update_status(res_id, status):
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("UPDATE reservations SET status=? WHERE id=?", (status, res_id))
-    conn.commit()
-    conn.close()
-
-
 # -------------------------------
-# UI
+# UI PAGES
 # -------------------------------
 
-def home():
-    st.title(f"🍽️ Welcome to {RESTAURANT_NAME}")
-    st.subheader("Luxury Dining Experience & Easy Reservations")
+def landing():
+    load_ui()
 
-    st.divider()
+    logo()
 
-    st.header("Book a Table")
-
-    with st.form("booking"):
-        name = st.text_input("Full Name")
-        phone = st.text_input("Phone")
-        email = st.text_input("Email")
-        rdate = st.date_input("Date")
-        rtime = st.time_input("Time")
-        guests = st.number_input("Guests", 1, 20)
-        requests = st.text_area("Special Requests")
-
-        submit = st.form_submit_button("Reserve Now")
-
-        if submit:
-            if is_slot_taken(rdate, rtime, guests):
-                st.error("This time slot is already booked. Please choose another.")
-            elif not name or not phone:
-                st.error("Name and phone are required.")
-            else:
-                insert_reservation(name, phone, email, rdate, rtime, guests, requests)
-                st.success("Reservation confirmed at Matt Tasty Treats 🎉")
+    st.markdown(f"""
+    <div class='hero'>
+        <div class='title'>{RESTAURANT_NAME}</div>
+        <div class='subtitle'>Luxury Dining • Smart Reservations • Premium Experience</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
+def dashboard(user):
+    st.sidebar.title("Navigation")
 
-def reservations():
-    st.title("📋 Reservations")
+    page = st.sidebar.radio("Go to", ["Home", "My Reservations", "Admin"])
 
-    df = fetch_reservations()
+    if page == "Home":
+        st.subheader("Book a Table 🍽️")
 
-    if df.empty:
-        st.info("No reservations yet.")
-        return
+        with st.form("book"):
+            name = st.text_input("Name")
+            phone = st.text_input("Phone")
+            email = st.text_input("Email")
+            date = st.date_input("Date")
+            time = st.time_input("Time")
+            guests = st.number_input("Guests", 1, 20)
 
-    for _, row in df.iterrows():
-        with st.container():
-            col1, col2, col3, col4 = st.columns([3,3,2,2])
+            if st.form_submit_button("Reserve"):
+                table = create_reservation(user["id"], name, phone, email, date, time, guests)
+                st.success(f"Booked at Table {table} 🍽️")
 
-            with col1:
-                st.write(row["customer_name"])
-                st.caption(row["phone"])
+    elif page == "My Reservations":
+        st.subheader("Your Bookings")
+        df = fetch_reservations(user["role"], user["id"])
+        st.dataframe(df, use_container_width=True)
 
-            with col2:
-                st.write(f"{row['reservation_date']} {row['reservation_time']}")
-                st.caption(f"{row['guest_count']} guests")
-
-            with col3:
-                st.write(row["status"])
-
-            with col4:
-                if st.button("Cancel", key=f"c_{row['id']}"):
-                    update_status(row["id"], "cancelled")
-                    st.rerun()
-
-
-
-def admin():
-    st.title("🔐 Admin Dashboard - Matt Tasty Treats")
-
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        if login(username, password):
-            st.session_state.admin = True
+    elif page == "Admin":
+        if user["role"] != "admin":
+            st.error("Access denied")
         else:
-            st.error("Invalid credentials")
+            st.subheader("Admin Control Center")
+            df = fetch_reservations("admin", None)
 
-    if not st.session_state.get("admin"):
-        return
+            col1, col2 = st.columns(2)
+            col1.metric("Total Bookings", len(df))
+            col2.metric("Active", len(df))
 
-    df = fetch_reservations()
-
-    st.metric("Total Reservations", len(df))
-
-    st.subheader("All Reservations")
-    st.dataframe(df, use_container_width=True)
-
-    st.subheader("Analytics")
-    if not df.empty:
-        chart = df.groupby("reservation_date")["id"].count()
-        st.bar_chart(chart)
+            st.dataframe(df, use_container_width=True)
 
 
 # -------------------------------
-# ROUTER
+# APP
 # -------------------------------
 
 def main():
     init_db()
 
-    if "page" not in st.session_state:
-        st.session_state.page = "Home"
+    if "user" not in st.session_state:
+        st.title("Login - Matt Tasty Treats")
 
-    st.sidebar.title(RESTAURANT_NAME)
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
 
-    if st.sidebar.button("Home"):
-        st.session_state.page = "Home"
+        if st.button("Login"):
+            user = login(username, password)
+            if user:
+                st.session_state.user = user
+                st.rerun()
+            else:
+                st.error("Invalid login")
+        return
 
-    if st.sidebar.button("Reservations"):
-        st.session_state.page = "Reservations"
+    user = st.session_state.user
 
-    if st.sidebar.button("Admin"):
-        st.session_state.page = "Admin"
-
-    st.sidebar.divider()
-
-    if st.sidebar.button("Reset"):
-        st.rerun()
-
-    if st.session_state.page == "Home":
-        home()
-    elif st.session_state.page == "Reservations":
-        reservations()
-    elif st.session_state.page == "Admin":
-        admin()
+    dashboard(user)
 
 
 if __name__ == "__main__":
