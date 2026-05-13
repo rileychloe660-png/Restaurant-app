@@ -157,15 +157,53 @@ def admin_dashboard():
 # -------------------------------
 
 def main():
-    st.set_page_config(page_title="Restaurant System", layout="wide")
+    st.set_page_config(
+        page_title="Restaurant Reservation System",
+        page_icon="🍽️",
+        layout="wide"
+    )
 
     init_database()
 
-    if st.sidebar.button("Admin"):
-        admin_dashboard()
-    else:
-        st.title("Restaurant Reservation System")
-        st.info("Use sidebar to access admin")
+    st.sidebar.title("🍽️ Restaurant System")
 
-if __name__ == "__main__":
-    main()
+    page = st.sidebar.radio(
+        "Navigation",
+        [
+            "🏠 Home",
+            "📅 Make Reservation",
+            "🔍 Check Reservation",
+            "❌ Cancel Reservation",
+            "🔐 Admin Login"
+        ]
+    )
+
+    if page == "🏠 Home":
+        st.title("🍽️ Restaurant Reservation System")
+
+        st.markdown("""
+        Welcome to our restaurant reservation platform.
+
+        Use the sidebar to:
+        - Book reservations
+        - Check reservation status
+        - Cancel reservations
+        - Access admin dashboard
+        """)
+
+        st.image(
+            "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4",
+            use_container_width=True
+        )
+
+    elif page == "📅 Make Reservation":
+        customer_booking_page()
+
+    elif page == "🔍 Check Reservation":
+        check_reservation_status()
+
+    elif page == "❌ Cancel Reservation":
+        customer_cancel_page()
+
+    elif page == "🔐 Admin Login":
+        admin_login()
